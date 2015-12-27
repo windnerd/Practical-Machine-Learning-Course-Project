@@ -1,0 +1,74 @@
+---
+title: "Practical Machine Learning-Course Project"
+author: "windnerd"
+date: "December 26, 2015"
+output: html_document
+---
+
+# Objective: 
+Given the large activity monitoring device dataset from six individuals, create a model that classifies new observations from the same device into one of five movement types. A test dataset is provided that contains the same number of signals and has twenty distinct test scenarios, these scenarios are passed through the final model to produce the answers to the 20 submittal questions.
+
+# Discussion: 
+## Model Selection
+The random forest model is among the best options for models that are designed to classify observations into categories. An extremely helpful aspect of this model approach is the realtime estimate of the model error as the model build progresses. Seperate cross validation (k-fold) for instance is not needed. Other models that perform well with classification type problems include K nearest neighbor classification, decision trees, and gradient boosting. Given the flexibility, robustness, and inherent validation process of the random forest model, the 'rf' method is selected with adjusted defaults (Number of trees=10) to create a model that predicts movement class (A,B,C,D,or E).
+
+```{r}
+library(caret)
+```
+
+## Model Predictor Selection
+To avoid building a model with more predictors than necessary and in the essense of computation time, the test dataset is inspected to determine what values will be available for each of the 20 test scenarions. It turns out, a small subsample of the 160 signals available in the dataset actually have valid observations. I identified these columns, and removed them from the training dataset prior to building a random forest model, with outcome of movement class (A,B,C,D or E).In addition to these removed fields, I removed the observation id "X", the user name, the three timestamps, the "newwindow" and "numwindow" signals. These signals were removed to make the model as general as possible and there is not beleived to be a time dependent signal in this dataset.
+
+```{r}
+pmltrain_init<-read.csv("//Users//windnerd//Documents//coursera//Practical Machine Learning//course project//pml-training.csv", header = TRUE, sep = ",",na.strings=c("NA","#DIV/0!"," "))
+
+pmltest_init<-read.csv("//Users//windnerd//Documents//coursera//Practical Machine Learning//course project//pml-testing.csv", header = TRUE, sep = ",",na.strings=c("NA","#DIV/0!"," "))
+
+# remove the signals from both train and test datasets that are completly empty in train set
+i_del<-which(sapply(pmltrain_init,class)=="logical")
+pmltrain<-subset(pmltrain_init,select=c(-i_del))
+pmltest<-subset(pmltest_init,select=c(-i_del))
+```
+
+
+## Model Implementation
+In an effort to determine the sensitivity of the model to training observations, I decided to break the training dataset into three folds. I create a model for each fold, and pass the 20 test scenarios through this model to predict the movement class for each test case. I will get three sets of predictions, utilizing three models built with three independent folds of the original training dataset.
+
+```{r}
+flds<-createFolds(y=pmltrain$classe,k=3)
+# 3. cross validation of models
+for (i in 1:3){
+  
+  # select indeces of current fold
+  i_cm<-flds[[i]]
+  # 2. model fitting- estimate the class of activity (outcome) given all other predictors 
+  X_train<-pmltrain[,-grep("X|user_name|raw_timestamp_part_1|raw_timestamp_part_2|cvtd_timestamp|new_window|num_window",colnames(pmltrain))]
+  X_test<-pmltest[,-grep("X|user_name|raw_timestamp_part_1|raw_timestamp_part_2|cvtd_timestamp|new_window|num_window|problem_id",colnames(pmltest))]
+
+  i_del<-which(sapply(X_test[1,],class)=="logical")
+  modl<-train(X_train$classe[i_cm]~.,data=X_train[i_cm,-i_del],method="rf",prox=TRUE,na.action = na.omit,ntree=10)
+  
+  # for each of the 20 test cases in test set, try the current model based on fold 1
+  prediction_store<-NULL
+  for (j in 1:20){
+    i_p<-which(pmltest$problem_id==j)
+    i_del<-which(sapply(X_test[j,],class)=="logical")
+    # 5. Generate the results for the 20 different test cases, one file per test case with letter of classification
+    prediction<-predict(modl,newdata=X_test[i_p,-i_del],na.action = na.omit)
+    prediction_store[j]<-prediction
+  }
+  print(prediction_store)
+  # write
+  #pml_write_files(prediction_store,i)
+}
+```
+
+
+## Results
+I generated three separate random forest models using three folds of the original training dataset, I introduce the concepts of the resultant random forest model from the third fold below. The out of bag (OOB) estimate of the error rate is only 6.5%.
+
+The confusion matrix of the final model is useful to identify the effectiveness or accuracy of the random forest model. A perfect model would have zeros everywhere except the diagonal. The off-diagnocal components of the confusion matrix below shows how many and where the miss categorizations occured. Finally, the classification error is provided in the final column.
+
+```{r}
+modl$finalModel
+```
